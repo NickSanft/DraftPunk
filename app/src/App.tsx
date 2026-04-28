@@ -10,6 +10,7 @@ import {
   getAllAwareness,
   type UserAwareness,
 } from './crdt/awareness';
+import { yToStroke } from './crdt/document';
 import { CanvasView } from './components/CanvasView';
 import { DebugOverlay } from './components/DebugOverlay';
 import { Toolbar } from './components/Toolbar';
@@ -244,6 +245,7 @@ export function App() {
       seed: (n) => seedStrokes(yStrokes, doc, n),
       clear: () => clearStrokes(yStrokes, doc),
       getStrokeCount: () => yStrokes.length,
+      getStrokes: () => yStrokes.toArray().map(yToStroke),
       getMetrics: () => engine?.getMetrics() ?? EMPTY_METRICS,
       undo: () => undoManager.undo(),
       redo: () => undoManager.redo(),

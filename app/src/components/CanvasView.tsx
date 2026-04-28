@@ -7,6 +7,7 @@ import { StrokeSubscription } from '../crdt/subscription';
 import { getStrokes } from '../crdt/document';
 import { getRemoteAwareness } from '../crdt/awareness';
 import { createTool } from '../tools/createTool';
+import { EraserTool } from '../tools/EraserTool';
 import { PenTool } from '../tools/PenTool';
 import type { Tool, ToolContext, ToolType } from '../tools/Tool';
 import type { StrokeStyle } from '../types/canvas';
@@ -20,7 +21,18 @@ interface Props {
   onEngineReady?: (engine: CanvasEngine | null) => void;
 }
 
-const CURSOR_PUBLISH_INTERVAL_MS = 16; // ~60Hz cap
+const CURSOR_PUBLISH_INTERVAL_MS = 16;
+
+// Pen styluses report their flipped (eraser) end via PointerEvent.button === 5
+// on pointerdown. Some report -1 with the eraser bit in `buttons` instead.
+function isPenEraser(e: PointerEvent): boolean {
+  if (e.pointerType !== 'pen') return false;
+  if (e.button === 5) return true;
+  // Fallback for drivers that don't set button=5: eraser bit (32) is set
+  // and primary button (1) is NOT set.
+  if ((e.buttons & 32) === 32 && (e.buttons & 1) === 0) return true;
+  return false;
+}
 
 export function CanvasView({ doc, awareness, userId, toolType, penStyle, onEngineReady }: Props) {
   const mainRef = useRef<HTMLCanvasElement>(null);
@@ -28,6 +40,8 @@ export function CanvasView({ doc, awareness, userId, toolType, penStyle, onEngin
   const cursorRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<CanvasEngine | null>(null);
   const toolRef = useRef<Tool | null>(null);
+  const eraserToolRef = useRef<EraserTool>(new EraserTool());
+  const activeGestureToolRef = useRef<Tool | null>(null);
   const ctxRef = useRef<ToolContext | null>(null);
   const lastCursorPublishRef = useRef(0);
 
@@ -72,33 +86,43 @@ export function CanvasView({ doc, awareness, userId, toolType, penStyle, onEngin
     };
 
     const onPointerDown = (e: PointerEvent) => {
-      if (!toolRef.current || !ctxRef.current) return;
-      activeCanvas.setPointerCapture(e.pointerId);
+      if (!ctxRef.current) return;
+      try {
+        activeCanvas.setPointerCapture(e.pointerId);
+      } catch {
+        // Synthetic events with non-active pointerIds can throw. Don't let
+        // that block the tool dispatch below.
+      }
       const input = fromPointerEvent(e, activeCanvas);
       publishCursor(input.x, input.y);
-      toolRef.current.onPointerDown(input, ctxRef.current);
+      // Pen-flip: stylus eraser end always erases regardless of selected tool.
+      const tool = isPenEraser(e) ? eraserToolRef.current : toolRef.current;
+      activeGestureToolRef.current = tool;
+      tool?.onPointerDown(input, ctxRef.current);
     };
 
     const onPointerMove = (e: PointerEvent) => {
-      if (!toolRef.current || !ctxRef.current) return;
+      if (!ctxRef.current) return;
       const input = fromPointerEvent(e, activeCanvas);
       publishCursor(input.x, input.y);
-      toolRef.current.onPointerMove(input, ctxRef.current);
+      activeGestureToolRef.current?.onPointerMove(input, ctxRef.current);
     };
 
     const onPointerUp = (e: PointerEvent) => {
-      if (!toolRef.current || !ctxRef.current) return;
+      if (!ctxRef.current) return;
       try {
         activeCanvas.releasePointerCapture(e.pointerId);
       } catch {
         // already released
       }
-      toolRef.current.onPointerUp(fromPointerEvent(e, activeCanvas), ctxRef.current);
+      activeGestureToolRef.current?.onPointerUp(fromPointerEvent(e, activeCanvas), ctxRef.current);
+      activeGestureToolRef.current = null;
     };
 
     const onPointerCancel = () => {
-      if (!toolRef.current || !ctxRef.current) return;
-      toolRef.current.onPointerCancel(ctxRef.current);
+      if (!ctxRef.current) return;
+      activeGestureToolRef.current?.onPointerCancel(ctxRef.current);
+      activeGestureToolRef.current = null;
     };
 
     const onPointerLeave = () => {
@@ -123,11 +147,11 @@ export function CanvasView({ doc, awareness, userId, toolType, penStyle, onEngin
       engine.destroy();
       engineRef.current = null;
       ctxRef.current = null;
+      activeGestureToolRef.current = null;
       onEngineReady?.(null);
     };
   }, [doc, userId, yStrokes, awareness, onEngineReady]);
 
-  // Render remote cursors when awareness changes.
   useEffect(() => {
     const engine = engineRef.current;
     if (!awareness || !engine) return;
@@ -139,7 +163,6 @@ export function CanvasView({ doc, awareness, userId, toolType, penStyle, onEngin
     return () => awareness.off('change', update);
   }, [awareness]);
 
-  // Swap the active tool when toolType changes.
   useEffect(() => {
     const ctx = ctxRef.current;
     if (!ctx) return;
@@ -154,9 +177,6 @@ export function CanvasView({ doc, awareness, userId, toolType, penStyle, onEngin
     ctx.engine.renderActive(null, null);
   }, [toolType, userId, penStyle]);
 
-  // Apply pen style changes without recreating the tool — preserves any
-  // in-progress stroke (StrokeBuilder captures style at begin time, so a
-  // mid-stroke style change doesn't disturb the current stroke).
   useEffect(() => {
     if (toolRef.current instanceof PenTool) {
       toolRef.current.setStyle(penStyle);

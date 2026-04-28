@@ -14,10 +14,16 @@ export interface StrokeStyle {
   lineCap: 'round' | 'square' | 'butt';
 }
 
+export type PointerType = 'mouse' | 'pen' | 'touch';
+
 export interface Stroke {
   id: string;
   userId: string;
   points: Point[];
   style: StrokeStyle;
   timestamp: number;
+  // Captured at pointerdown so the renderer can pick variable-width
+  // (pen/touch) vs constant-width (mouse). Optional for backwards
+  // compatibility with strokes produced before Phase F1.
+  pointerType?: PointerType;
 }

@@ -1,15 +1,23 @@
-import type { Point, Stroke, StrokeStyle } from '../types/canvas';
+import type { Point, PointerType, Stroke, StrokeStyle } from '../types/canvas';
+
+export interface StrokePreview {
+  points: readonly Point[];
+  style: StrokeStyle;
+  pointerType?: PointerType;
+}
 
 export class StrokeBuilder {
   private points: Point[] = [];
   private style: StrokeStyle | null = null;
+  private pointerType: PointerType | undefined;
   private startedAt = 0;
 
   constructor(private readonly userId: string) {}
 
-  begin(style: StrokeStyle, point: Point): void {
+  begin(style: StrokeStyle, point: Point, pointerType?: PointerType): void {
     this.points = [point];
     this.style = style;
+    this.pointerType = pointerType;
     this.startedAt = Date.now();
   }
 
@@ -22,9 +30,9 @@ export class StrokeBuilder {
     return this.style !== null;
   }
 
-  preview(): { points: readonly Point[]; style: StrokeStyle } | null {
+  preview(): StrokePreview | null {
     if (!this.style || this.points.length === 0) return null;
-    return { points: this.points, style: this.style };
+    return { points: this.points, style: this.style, pointerType: this.pointerType };
   }
 
   commit(): Stroke | null {
@@ -38,6 +46,7 @@ export class StrokeBuilder {
       points: this.points,
       style: this.style,
       timestamp: this.startedAt,
+      pointerType: this.pointerType,
     };
     this.reset();
     return stroke;
@@ -50,6 +59,7 @@ export class StrokeBuilder {
   private reset(): void {
     this.points = [];
     this.style = null;
+    this.pointerType = undefined;
     this.startedAt = 0;
   }
 }

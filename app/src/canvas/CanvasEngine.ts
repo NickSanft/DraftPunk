@@ -1,4 +1,4 @@
-import type { Point, Stroke, StrokeStyle } from '../types/canvas';
+import type { Point, PointerType, Stroke, StrokeStyle } from '../types/canvas';
 import type { UserAwareness } from '../crdt/awareness';
 import { renderAll, renderStroke } from './Renderer';
 import { renderCursors } from './CursorRenderer';
@@ -14,6 +14,12 @@ export interface PerfMetrics {
 
 const AVG_WINDOW = 30;
 
+interface PendingActive {
+  points: readonly Point[] | null;
+  style: StrokeStyle | null;
+  pointerType?: PointerType;
+}
+
 export class CanvasEngine {
   private readonly mainCtx: CanvasRenderingContext2D;
   private readonly activeCtx: CanvasRenderingContext2D;
@@ -21,7 +27,7 @@ export class CanvasEngine {
   private dpr = 1;
 
   private pendingMain: { strokes: readonly Stroke[] } | null = null;
-  private pendingActive: { points: readonly Point[] | null; style: StrokeStyle | null } | null = null;
+  private pendingActive: PendingActive | null = null;
   private pendingCursors: readonly UserAwareness[] | null = null;
   private rafId: number | null = null;
   private destroyed = false;
@@ -69,9 +75,13 @@ export class CanvasEngine {
     this.scheduleFlush();
   }
 
-  renderActive(points: readonly Point[] | null, style: StrokeStyle | null): void {
+  renderActive(
+    points: readonly Point[] | null,
+    style: StrokeStyle | null,
+    pointerType?: PointerType,
+  ): void {
     if (this.destroyed) return;
-    this.pendingActive = { points, style };
+    this.pendingActive = { points, style, pointerType };
     this.scheduleFlush();
   }
 
@@ -127,10 +137,10 @@ export class CanvasEngine {
     if (this.pendingActive) {
       const t0 = performance.now();
       this.clear(this.activeCtx, this.activeCanvas);
-      const { points, style } = this.pendingActive;
+      const { points, style, pointerType } = this.pendingActive;
       const hasContent = !!(points && style && points.length > 0);
       if (hasContent) {
-        renderStroke(this.activeCtx, points!, style!);
+        renderStroke(this.activeCtx, points!, style!, pointerType);
       }
       const dt = performance.now() - t0;
       this.metrics.lastActiveRenderMs = dt;

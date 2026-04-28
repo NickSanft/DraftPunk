@@ -13,6 +13,7 @@ interface Window {
     seed: (n: number) => void;
     clear: () => void;
     getStrokeCount: () => number;
+    getStrokes: () => import('./types/canvas').Stroke[];
     getMetrics: () => import('./canvas/CanvasEngine').PerfMetrics;
     undo: () => void;
     redo: () => void;

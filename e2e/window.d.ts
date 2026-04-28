@@ -6,6 +6,7 @@ declare global {
       seed: (n: number) => void;
       clear: () => void;
       getStrokeCount: () => number;
+      getStrokes: () => import('../app/src/types/canvas').Stroke[];
       getMetrics: () => import('../app/src/canvas/CanvasEngine').PerfMetrics;
       undo: () => void;
       redo: () => void;

@@ -1,5 +1,5 @@
 import * as Y from 'yjs';
-import type { Point, Stroke, StrokeStyle } from '../types/canvas';
+import type { Point, PointerType, Stroke, StrokeStyle } from '../types/canvas';
 
 export type YStroke = Y.Map<unknown>;
 export type YStrokes = Y.Array<YStroke>;
@@ -17,6 +17,9 @@ export function strokeToY(stroke: Stroke): YStroke {
   m.set('points', stroke.points);
   m.set('style', stroke.style);
   m.set('timestamp', stroke.timestamp);
+  if (stroke.pointerType !== undefined) {
+    m.set('pointerType', stroke.pointerType);
+  }
   return m;
 }
 
@@ -27,5 +30,6 @@ export function yToStroke(y: YStroke): Stroke {
     points: y.get('points') as Point[],
     style: y.get('style') as StrokeStyle,
     timestamp: y.get('timestamp') as number,
+    pointerType: y.get('pointerType') as PointerType | undefined,
   };
 }

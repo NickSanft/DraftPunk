@@ -1,6 +1,7 @@
-import type { Point, Stroke, StrokeStyle } from '../types/canvas';
+import type { Point, PointerType, Stroke, StrokeStyle } from '../types/canvas';
+import { renderPressureStroke } from './PressureRenderer';
 
-export function renderStroke(
+export function renderConstantStroke(
   ctx: CanvasRenderingContext2D,
   points: readonly Point[],
   style: StrokeStyle,
@@ -35,11 +36,24 @@ export function renderStroke(
   ctx.restore();
 }
 
+export function renderStroke(
+  ctx: CanvasRenderingContext2D,
+  points: readonly Point[],
+  style: StrokeStyle,
+  pointerType?: PointerType,
+): void {
+  if (pointerType === 'pen' || pointerType === 'touch') {
+    renderPressureStroke(ctx, points, style);
+  } else {
+    renderConstantStroke(ctx, points, style);
+  }
+}
+
 export function renderAll(
   ctx: CanvasRenderingContext2D,
   strokes: readonly Stroke[],
 ): void {
   for (const stroke of strokes) {
-    renderStroke(ctx, stroke.points, stroke.style);
+    renderStroke(ctx, stroke.points, stroke.style, stroke.pointerType);
   }
 }

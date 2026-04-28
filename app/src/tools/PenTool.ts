@@ -22,7 +22,7 @@ export class PenTool implements Tool {
   }
 
   onPointerDown(input: PointerInputState, ctx: ToolContext): void {
-    this.builder.begin(this.style, this.toPoint(input));
+    this.builder.begin(this.style, this.toPoint(input), input.pointerType);
     this.flushPreview(ctx);
   }
 
@@ -69,6 +69,8 @@ export class PenTool implements Tool {
 
   private flushPreview(ctx: ToolContext): void {
     const preview = this.builder.preview();
-    if (preview) ctx.engine.renderActive(preview.points, preview.style);
+    if (preview) {
+      ctx.engine.renderActive(preview.points, preview.style, preview.pointerType);
+    }
   }
 }
