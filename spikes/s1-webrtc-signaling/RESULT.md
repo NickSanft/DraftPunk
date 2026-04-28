@@ -1,51 +1,48 @@
 # Spike S1 — Result
 
-> Fill this in after running the spike. This becomes source material for ADR-002 (P2P over client-server).
-
 ## Setup
 
-- Date tested: _YYYY-MM-DD_
-- Browser A: _e.g., Chrome 132 (normal window)_
-- Browser B: _e.g., Firefox 134 (private window) / Chrome incognito / Safari_
+- Date tested: 2026-04-27
+- Browser: Chrome (normal + incognito)
 - y-webrtc version: 10.3.0
 - yjs version: 13.6.20
-- Signaling server(s) tested: `wss://signaling.yjs.dev`
+- Signaling servers tested: all three y-webrtc defaults
 
-## Test 1 — Same machine, different browser sessions (LAN baseline)
+## What we found
 
-- Time from Join → `connected=true`: _ms_
-- WebRTC peers after Join: _N_
-- BC peers after Join: _N_ (should be 0 if browsers truly isolated)
-- Single-stroke round-trip latency: _ms_
-- 100-stroke transaction convergence: _ms on receiver_
-- Console errors: _none / list_
-- Outcome: ☐ pass ☐ fail
+**All three default y-webrtc signaling servers are decommissioned Heroku apps.**
 
-## Test 2 — Same machine, two networks (one tethered to phone hotspot)
+| URL | DNS resolves to | HTTPS | WebSocket |
+|-----|-----------------|-------|-----------|
+| `wss://signaling.yjs.dev` | CNAME → `perpendicular-constrictor-qg52f4r55o2ig7gewnfh7542.herokudns.com` | Heroku 404 | fails ~1.8s |
+| `wss://y-webrtc-signaling-eu.herokuapp.com` | `va05.ingress.herokuapp.com` (Heroku ingress) | Heroku 404 (`Server: heroku-router`) | fails ~3s |
+| `wss://y-webrtc-signaling-us.herokuapp.com` | `va01.ingress.herokuapp.com` (Heroku ingress) | Heroku 404 (`Server: heroku-router`) | fails ~4.4s |
 
-- Network A: _e.g., home wifi 192.168.1.x_
-- Network B: _e.g., phone hotspot 4G/5G_
-- Time from Join → `connected=true`: _ms_
-- WebRTC peers after Join: _N_ ← **critical: must be ≥ 1**
-- Single-stroke round-trip latency: _ms_
-- Console errors: _none / list_
-- Outcome: ☐ pass ☐ fail
+Heroku discontinued the free tier in November 2022. The DNS records still exist (CNAMEs to Heroku endpoints), but the apps behind them no longer exist. Heroku's router responds with HTTP 404 to any request, which the browser surfaces as a generic "WebSocket connection failed."
 
-## Test 3 — Two physical machines, two networks (if available)
-
-- Machine A: _e.g., laptop on home wifi_
-- Machine B: _e.g., another laptop on phone hotspot or remote network_
-- Time from Join → `connected=true`: _ms_
-- WebRTC peers after Join: _N_
-- Single-stroke round-trip latency: _ms_
-- Outcome: ☐ pass ☐ fail
+In-app behavior:
+- y-webrtc's `status` event still fires `connected: true` (it reflects provider initialization, not actual signaling reachability — misleading)
+- Both windows show 0 WebRTC peers (signaling never delivered SDP exchange)
+- Both windows show 0 BC peers (incognito + normal are isolated for BroadcastChannel)
+- Browser console: `WebSocket connection to 'wss://signaling.yjs.dev/' failed`
 
 ## Verdict
 
-☐ **GREEN** — proceed to Phase A. Public signaling works across NATs.
-☐ **YELLOW** — works on most networks but failed on _X_. Document limitation, proceed with caveat.
-☐ **RED** — architecture must change. Recommendation: _y-websocket relay / self-host TURN / scope reduction_.
+**RED — architecture must change.**
 
-## Notes / surprises
+The "deploy to GitHub Pages with no infrastructure required" headline cannot be honored using y-webrtc's bundled signaling defaults. The Yjs project hasn't migrated its public signaling to maintained infrastructure since Heroku's shutdown.
 
-_Anything unexpected — connection drops, weird peer counts, BC vs WebRTC mismatches, signaling fallback behavior._
+Even if one server comes back, building on community-run free signaling with no uptime guarantee is not viable for a portfolio project.
+
+## Pivot options (decision pending)
+
+1. **Self-hosted signaling on a free tier (Fly.io / Render).** Keeps WebRTC P2P for stroke data; signaling relay only handles peer discovery. README narrative stays mostly intact: "Strokes are P2P over WebRTC; a tiny self-hosted signaling relay helps peers discover each other but never sees your drawings."
+2. **PartyKit (Cloudflare Durable Objects) with `y-partykit`.** Drops P2P framing — all data flows through Cloudflare. Gains: late-joiner state persistence for free, zero ops, reliable. Narrative shifts to "edge-deployed CRDT sync."
+3. **`y-websocket` against a free relay.** Same trade as 2 but without PartyKit's polish. Not recommended over option 2.
+
+## What we proved despite the failure
+
+- y-webrtc + yjs work correctly in the browser (provider initializes, observers fire, `Y.Map` and `Y.Array` mutate as expected)
+- The CRDT model from the design doc (`Y.Array<Y.Map>` with nested `Y.Array` of points) round-trips fine in a single peer
+- BroadcastChannel sync would work for same-browser-profile tabs (verified by isolation behavior)
+- The kill criterion mechanism works — we caught a foundational architecture issue in one session
