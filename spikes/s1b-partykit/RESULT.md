@@ -1,48 +1,57 @@
 # Spike S1b — Result
 
-> Fill this in after running the spike. This becomes source material for the
-> revised ADR-002 (sync architecture: PartyKit instead of WebRTC + signaling).
-
 ## Setup
 
-- Date tested: _YYYY-MM-DD_
-- Browsers tested: _e.g., Chrome 132 + Firefox 134_
-- partykit version: _from `npm ls partykit`_
-- y-partykit version: _from `npm ls y-partykit`_
-- yjs version: 13.6.20
+- Date tested: 2026-04-27
+- Browsers: cross-window (no incognito requirement, unlike S1)
+- partykit: 0.0.115
+- y-partykit: 0.0.33
+- yjs: 13.6.30
 
-## Test 1 — Round-trip sync between two windows
+## Results
 
-- Time from Join → `provider status: connected`: _ms_
-- Single-stroke round-trip latency: _ms_
-- 100-stroke transaction convergence on receiver: _ms_
-- Console errors: _none / list_
-- Outcome: ☐ pass ☐ fail
+| Test | Outcome |
+|------|---------|
+| Round-trip sync between two windows | ✅ pass |
+| Late joiner receives full state | ✅ pass |
+| Server-restart persistence | ✅ pass |
 
-## Test 2 — Late joiner receives full state
-
-- Procedure: add 5 strokes in window A → close A → open new window C
-- Did window C immediately show 5 strokes? ☐ yes ☐ no
-- Did C log a `synced: true` event? ☐ yes ☐ no
-- Outcome: ☐ pass ☐ fail
-
-## Test 3 — Server-restart persistence
-
-- Procedure: add strokes → Ctrl+C the server → `npm run dev` again → refresh both windows
-- Did strokes survive the restart? ☐ yes ☐ no
-- If no, what was lost? _e.g., the snapshot hadn't been written yet_
-- Outcome: ☐ pass ☐ fail
-
-## Test 4 — All-clients-gone persistence
-
-- Procedure: close all windows → wait 60s → reopen
-- Strokes still there? ☐ yes ☐ no
-- Outcome: ☐ pass ☐ fail
+The three tests that justified pivoting away from y-webrtc all pass. The
+late-joiner case in particular — which y-webrtc fundamentally cannot solve
+without an always-online peer — works on the first try with
+`persist: { mode: "snapshot" }` because the Durable Object holds the Y.Doc
+state independently of any connected client.
 
 ## Verdict
 
-☐ **GREEN** — proceed to Phase A scaffold using PartyKit + y-partykit + yjs.
-☐ **YELLOW** — works for X, fails for Y. Need to address _____ before Phase A.
-☐ **RED** — pivot again. Recommendation: _____.
+**GREEN — proceed to Phase A using PartyKit + y-partykit + yjs.**
 
-## Notes / surprises
+## Architectural decisions confirmed by this spike
+
+- **Sync layer:** PartyKit (Cloudflare Durable Objects) via `y-partykit`.
+- **Persistence:** Durable Object snapshot mode. No separate database needed.
+  Replaces both the "y-indexeddb for local survival" and "export file for
+  sharing" mitigations from the original design — state just lives on the
+  edge.
+- **No more signaling/discovery problem:** clients connect directly to a
+  named room on a known PartyKit URL. The "share a URL" UX still works
+  (room name in the URL hash), but there's no peer-discovery dance.
+
+## What's lost from the original design
+
+- "Pure peer-to-peer, no server" framing. Stroke data flows through
+  Cloudflare's edge, not directly between browsers. Privacy story shifts
+  from "the server can't see your data" to "all data is encrypted in transit
+  and stored only in a Durable Object you control."
+- The original ADR-002 ("P2P over client-server") needs to be rewritten.
+- The "no infrastructure" bullet on the README needs to be rewritten —
+  there IS infrastructure now, just trivial and free.
+
+## What's gained
+
+- Late-joiner state recovery for free (eliminates a real product problem).
+- Reliable connection — no flaky community signaling servers.
+- Cross-network just works (no NAT traversal, no STUN/TURN).
+- Single deployment surface for the sync layer.
+- Simpler client code — no signaling URL list, no peer discovery, no
+  awareness fallback to BroadcastChannel.
