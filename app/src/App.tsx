@@ -6,9 +6,16 @@ import { connect } from './crdt/provider';
 import { getStrokes } from './crdt/document';
 import { clearStrokes, seedStrokes } from './crdt/seed';
 import { createUndoManager } from './crdt/undoManager';
+import {
+  getAllAwareness,
+  type UserAwareness,
+} from './crdt/awareness';
 import { CanvasView } from './components/CanvasView';
 import { DebugOverlay } from './components/DebugOverlay';
 import { Toolbar } from './components/Toolbar';
+import { UserList } from './components/UserList';
+import { ShareButton } from './components/ShareButton';
+import { colorForUser, nameForUser } from './utils/colors';
 import type { ToolType } from './tools/Tool';
 
 const PARTYKIT_HOST = import.meta.env.VITE_PARTYKIT_HOST ?? 'localhost:1999';
@@ -53,6 +60,7 @@ export function App() {
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [strokeCount, setStrokeCount] = useState(0);
+  const [users, setUsers] = useState<UserAwareness[]>([]);
 
   useEffect(() => {
     const handle = connect(PARTYKIT_HOST, room);
@@ -72,6 +80,36 @@ export function App() {
     return () => {
       provider.off('status', onStatus);
     };
+  }, [provider]);
+
+  // Initial awareness state for self.
+  useEffect(() => {
+    if (!provider) return;
+    provider.awareness.setLocalState({
+      userId,
+      name: nameForUser(userId),
+      color: colorForUser(userId),
+      cursor: null,
+      tool: 'pen',
+    });
+    return () => {
+      provider.awareness.setLocalState(null);
+    };
+  }, [provider, userId]);
+
+  // Sync tool changes to awareness.
+  useEffect(() => {
+    if (!provider) return;
+    provider.awareness.setLocalStateField('tool', toolType);
+  }, [provider, toolType]);
+
+  // Subscribe to awareness changes for the user list.
+  useEffect(() => {
+    if (!provider) return;
+    const update = () => setUsers(getAllAwareness(provider.awareness));
+    provider.awareness.on('change', update);
+    update();
+    return () => provider.awareness.off('change', update);
   }, [provider]);
 
   const yStrokes = useMemo(() => (doc ? getStrokes(doc) : null), [doc]);
@@ -97,7 +135,6 @@ export function App() {
     };
   }, [undoManager]);
 
-  // Track stroke count off the Y.Array directly so debug + UI stay in sync.
   useEffect(() => {
     if (!yStrokes) return;
     const update = () => setStrokeCount(yStrokes.length);
@@ -134,7 +171,7 @@ export function App() {
 
   // Debug API (window.__draftPunk) — gated behind ?debug=1.
   useEffect(() => {
-    if (!debug || !doc || !yStrokes || !undoManager) return;
+    if (!debug || !doc || !yStrokes || !undoManager || !provider) return;
     window.__draftPunk = {
       seed: (n) => seedStrokes(yStrokes, doc, n),
       clear: () => clearStrokes(yStrokes, doc),
@@ -152,11 +189,14 @@ export function App() {
         }, doc.clientID),
       setTool: (t) => setToolType(t),
       getTool: () => toolType,
+      getAwarenessStates: () => getAllAwareness(provider.awareness),
+      setCursor: (cursor) =>
+        provider.awareness.setLocalStateField('cursor', cursor),
     };
     return () => {
       delete window.__draftPunk;
     };
-  }, [debug, doc, yStrokes, undoManager, engine, toolType]);
+  }, [debug, doc, yStrokes, undoManager, engine, provider, toolType]);
 
   return (
     <div className="app">
@@ -170,15 +210,16 @@ export function App() {
           canUndo={canUndo}
           canRedo={canRedo}
         />
-        <span className="app-meta">
-          <span>room: <code>{room}</code></span>
-          <span>you: <code>{userId}</code></span>
-        </span>
+        <div className="app-header-right">
+          <UserList users={users} selfUserId={userId} />
+          <ShareButton />
+        </div>
       </header>
       <main className="app-canvas">
         {doc && (
           <CanvasView
             doc={doc}
+            awareness={provider?.awareness ?? null}
             userId={userId}
             toolType={toolType}
             onEngineReady={setEngine}

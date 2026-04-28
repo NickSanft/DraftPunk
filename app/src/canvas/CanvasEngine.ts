@@ -1,5 +1,7 @@
 import type { Point, Stroke, StrokeStyle } from '../types/canvas';
+import type { UserAwareness } from '../crdt/awareness';
 import { renderAll, renderStroke } from './Renderer';
+import { renderCursors } from './CursorRenderer';
 
 export interface PerfMetrics {
   lastMainRenderMs: number;
@@ -15,10 +17,12 @@ const AVG_WINDOW = 30;
 export class CanvasEngine {
   private readonly mainCtx: CanvasRenderingContext2D;
   private readonly activeCtx: CanvasRenderingContext2D;
+  private readonly cursorCtx: CanvasRenderingContext2D;
   private dpr = 1;
 
   private pendingMain: { strokes: readonly Stroke[] } | null = null;
   private pendingActive: { points: readonly Point[] | null; style: StrokeStyle | null } | null = null;
+  private pendingCursors: readonly UserAwareness[] | null = null;
   private rafId: number | null = null;
   private destroyed = false;
 
@@ -35,17 +39,20 @@ export class CanvasEngine {
   constructor(
     private readonly mainCanvas: HTMLCanvasElement,
     private readonly activeCanvas: HTMLCanvasElement,
+    private readonly cursorCanvas: HTMLCanvasElement,
   ) {
-    const mainCtx = mainCanvas.getContext('2d');
-    const activeCtx = activeCanvas.getContext('2d');
-    if (!mainCtx || !activeCtx) throw new Error('2d context not available');
-    this.mainCtx = mainCtx;
-    this.activeCtx = activeCtx;
+    const main = mainCanvas.getContext('2d');
+    const active = activeCanvas.getContext('2d');
+    const cursor = cursorCanvas.getContext('2d');
+    if (!main || !active || !cursor) throw new Error('2d context not available');
+    this.mainCtx = main;
+    this.activeCtx = active;
+    this.cursorCtx = cursor;
   }
 
   setSize(width: number, height: number, dpr = window.devicePixelRatio || 1): void {
     this.dpr = dpr;
-    for (const canvas of [this.mainCanvas, this.activeCanvas]) {
+    for (const canvas of [this.mainCanvas, this.activeCanvas, this.cursorCanvas]) {
       canvas.width = Math.round(width * dpr);
       canvas.height = Math.round(height * dpr);
       canvas.style.width = `${width}px`;
@@ -53,6 +60,7 @@ export class CanvasEngine {
     }
     this.mainCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.activeCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.cursorCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
   renderCommitted(strokes: readonly Stroke[]): void {
@@ -64,6 +72,12 @@ export class CanvasEngine {
   renderActive(points: readonly Point[] | null, style: StrokeStyle | null): void {
     if (this.destroyed) return;
     this.pendingActive = { points, style };
+    this.scheduleFlush();
+  }
+
+  renderCursors(users: readonly UserAwareness[]): void {
+    if (this.destroyed) return;
+    this.pendingCursors = users;
     this.scheduleFlush();
   }
 
@@ -79,6 +93,7 @@ export class CanvasEngine {
     }
     this.pendingMain = null;
     this.pendingActive = null;
+    this.pendingCursors = null;
   }
 
   private scheduleFlush(): void {
@@ -110,8 +125,6 @@ export class CanvasEngine {
       }
       const dt = performance.now() - t0;
       this.metrics.lastActiveRenderMs = dt;
-      // Only count "real" renders (with content) toward max + count, so the
-      // post-pointerup cleanup render doesn't dilute the measurement.
       if (hasContent) {
         this.metrics.activeRenderCount++;
         if (dt > this.metrics.maxActiveRenderMs) {
@@ -119,6 +132,12 @@ export class CanvasEngine {
         }
       }
       this.pendingActive = null;
+    }
+
+    if (this.pendingCursors) {
+      this.clear(this.cursorCtx, this.cursorCanvas);
+      renderCursors(this.cursorCtx, this.pendingCursors);
+      this.pendingCursors = null;
     }
   }
 
