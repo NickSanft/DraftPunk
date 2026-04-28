@@ -1,57 +1,29 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import * as Y from 'yjs';
-import { CanvasEngine, type PerfMetrics } from '../canvas/CanvasEngine';
+import { CanvasEngine } from '../canvas/CanvasEngine';
 import { fromPointerEvent } from '../input/PointerInputState';
-import { StrokeBuilder } from '../crdt/strokeBuilder';
 import { StrokeSubscription } from '../crdt/subscription';
-import { getStrokes, strokeToY } from '../crdt/document';
-import { clearStrokes, seedStrokes } from '../crdt/seed';
-import type { StrokeStyle } from '../types/canvas';
-import { DebugOverlay } from './DebugOverlay';
+import { getStrokes } from '../crdt/document';
+import { createTool } from '../tools/createTool';
+import type { Tool, ToolContext, ToolType } from '../tools/Tool';
 
 interface Props {
   doc: Y.Doc;
   userId: string;
-  debug?: boolean;
+  toolType: ToolType;
+  onEngineReady?: (engine: CanvasEngine | null) => void;
 }
 
-const DEFAULT_STYLE: StrokeStyle = {
-  color: '#18181b',
-  width: 3,
-  opacity: 1,
-  lineCap: 'round',
-};
-
-const EMPTY_METRICS: PerfMetrics = {
-  lastMainRenderMs: 0,
-  lastActiveRenderMs: 0,
-  maxActiveRenderMs: 0,
-  activeRenderCount: 0,
-  avgMainRenderMs: 0,
-  mainRenderCount: 0,
-};
-
-export function CanvasView({ doc, userId, debug }: Props) {
+export function CanvasView({ doc, userId, toolType, onEngineReady }: Props) {
   const mainRef = useRef<HTMLCanvasElement>(null);
   const activeRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<CanvasEngine | null>(null);
-  const [strokeCount, setStrokeCount] = useState(0);
+  const toolRef = useRef<Tool | null>(null);
+  const ctxRef = useRef<ToolContext | null>(null);
 
   const yStrokes = useMemo(() => getStrokes(doc), [doc]);
 
-  useEffect(() => {
-    if (!debug) return;
-    window.__draftPunk = {
-      seed: (n) => seedStrokes(yStrokes, doc, n),
-      clear: () => clearStrokes(yStrokes, doc),
-      getStrokeCount: () => yStrokes.length,
-      getMetrics: () => engineRef.current?.getMetrics() ?? EMPTY_METRICS,
-    };
-    return () => {
-      delete window.__draftPunk;
-    };
-  }, [debug, doc, yStrokes]);
-
+  // Set up the canvas engine + subscription. One-time per (doc, userId).
   useEffect(() => {
     const mainCanvas = mainRef.current;
     const activeCanvas = activeRef.current;
@@ -59,7 +31,8 @@ export function CanvasView({ doc, userId, debug }: Props) {
 
     const engine = new CanvasEngine(mainCanvas, activeCanvas);
     engineRef.current = engine;
-    const builder = new StrokeBuilder(userId);
+    onEngineReady?.(engine);
+
     const subscription = new StrokeSubscription(yStrokes);
 
     const fitToParent = () => {
@@ -73,56 +46,34 @@ export function CanvasView({ doc, userId, debug }: Props) {
 
     const unsubscribe = subscription.subscribe((strokes) => {
       engine.renderCommitted(strokes);
-      setStrokeCount(strokes.length);
     });
 
+    ctxRef.current = { doc, yStrokes, userId, engine };
+
     const onPointerDown = (e: PointerEvent) => {
+      if (!toolRef.current || !ctxRef.current) return;
       activeCanvas.setPointerCapture(e.pointerId);
-      const input = fromPointerEvent(e, activeCanvas);
-      builder.begin(DEFAULT_STYLE, {
-        x: input.x,
-        y: input.y,
-        pressure: input.pressure,
-        tiltX: input.tiltX,
-        tiltY: input.tiltY,
-        timestamp: performance.now(),
-      });
-      const preview = builder.preview();
-      if (preview) engine.renderActive(preview.points, preview.style);
+      toolRef.current.onPointerDown(fromPointerEvent(e, activeCanvas), ctxRef.current);
     };
 
     const onPointerMove = (e: PointerEvent) => {
-      if (!builder.isActive()) return;
-      const input = fromPointerEvent(e, activeCanvas);
-      builder.extend({
-        x: input.x,
-        y: input.y,
-        pressure: input.pressure,
-        tiltX: input.tiltX,
-        tiltY: input.tiltY,
-        timestamp: performance.now(),
-      });
-      const preview = builder.preview();
-      if (preview) engine.renderActive(preview.points, preview.style);
+      if (!toolRef.current || !ctxRef.current) return;
+      toolRef.current.onPointerMove(fromPointerEvent(e, activeCanvas), ctxRef.current);
     };
 
     const onPointerUp = (e: PointerEvent) => {
-      if (!builder.isActive()) return;
+      if (!toolRef.current || !ctxRef.current) return;
       try {
         activeCanvas.releasePointerCapture(e.pointerId);
       } catch {
-        // pointer may already be released
+        // already released
       }
-      const stroke = builder.commit();
-      engine.renderActive(null, null);
-      if (stroke) {
-        yStrokes.push([strokeToY(stroke)]);
-      }
+      toolRef.current.onPointerUp(fromPointerEvent(e, activeCanvas), ctxRef.current);
     };
 
     const onPointerCancel = () => {
-      builder.cancel();
-      engine.renderActive(null, null);
+      if (!toolRef.current || !ctxRef.current) return;
+      toolRef.current.onPointerCancel(ctxRef.current);
     };
 
     activeCanvas.addEventListener('pointerdown', onPointerDown);
@@ -140,23 +91,29 @@ export function CanvasView({ doc, userId, debug }: Props) {
       activeCanvas.removeEventListener('pointercancel', onPointerCancel);
       engine.destroy();
       engineRef.current = null;
+      ctxRef.current = null;
+      onEngineReady?.(null);
     };
-  }, [doc, userId, yStrokes]);
+  }, [doc, userId, yStrokes, onEngineReady]);
+
+  // Swap the active tool when toolType changes. Cancel any in-progress
+  // stroke from the outgoing tool so the active canvas isn't left stale.
+  useEffect(() => {
+    const ctx = ctxRef.current;
+    if (!ctx) return;
+    if (toolRef.current) {
+      toolRef.current.onPointerCancel(ctx);
+    }
+    toolRef.current = createTool(toolType, userId);
+    ctx.engine.renderActive(null, null);
+  }, [toolType, userId]);
+
+  const cursor = toolRef.current?.cursor ?? 'crosshair';
 
   return (
-    <>
-      <div className="canvas-stack">
-        <canvas ref={mainRef} className="canvas-layer committed" />
-        <canvas ref={activeRef} className="canvas-layer active" />
-      </div>
-      {debug && (
-        <DebugOverlay
-          getMetrics={() => engineRef.current?.getMetrics() ?? EMPTY_METRICS}
-          strokeCount={strokeCount}
-          onSeed={(n) => seedStrokes(yStrokes, doc, n)}
-          onClear={() => clearStrokes(yStrokes, doc)}
-        />
-      )}
-    </>
+    <div className="canvas-stack">
+      <canvas ref={mainRef} className="canvas-layer committed" />
+      <canvas ref={activeRef} className="canvas-layer active" style={{ cursor }} />
+    </div>
   );
 }

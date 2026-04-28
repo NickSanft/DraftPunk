@@ -26,11 +26,60 @@ html, body, #root {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0.5rem 1rem;
+  gap: 1rem;
+  padding: 0.4rem 1rem;
   border-bottom: 1px solid var(--border);
   font-size: 0.85rem;
   background: #fff;
   flex-shrink: 0;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.toolbar .tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.65rem;
+  background: #fafafa;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-family: inherit;
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.toolbar .tool:hover:not(:disabled) {
+  background: #f4f4f5;
+}
+
+.toolbar .tool.active {
+  background: var(--fg);
+  color: #fafafa;
+  border-color: var(--fg);
+}
+
+.toolbar .tool:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.toolbar .tool-icon {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.toolbar-divider {
+  display: inline-block;
+  width: 1px;
+  height: 1.4em;
+  background: var(--border);
+  margin: 0 0.35rem;
 }
 
 .app-name {

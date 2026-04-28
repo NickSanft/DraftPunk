@@ -14,5 +14,12 @@ interface Window {
     clear: () => void;
     getStrokeCount: () => number;
     getMetrics: () => import('./canvas/CanvasEngine').PerfMetrics;
+    undo: () => void;
+    redo: () => void;
+    canUndo: () => boolean;
+    canRedo: () => boolean;
+    deleteStroke: (idx: number) => void;
+    setTool: (t: import('./tools/Tool').ToolType) => void;
+    getTool: () => import('./tools/Tool').ToolType;
   };
 }

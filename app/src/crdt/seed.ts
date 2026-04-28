@@ -25,13 +25,13 @@ export function seedStrokes(
       };
       yStrokes.push([strokeToY(stroke)]);
     }
-  });
+  }, doc.clientID);
 }
 
 export function clearStrokes(yStrokes: YStrokes, doc: Y.Doc): void {
   doc.transact(() => {
     yStrokes.delete(0, yStrokes.length);
-  });
+  }, doc.clientID);
 }
 
 function generateStrokePoints(width: number, height: number): Point[] {

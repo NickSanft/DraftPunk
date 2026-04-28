@@ -7,6 +7,13 @@ declare global {
       clear: () => void;
       getStrokeCount: () => number;
       getMetrics: () => import('../app/src/canvas/CanvasEngine').PerfMetrics;
+      undo: () => void;
+      redo: () => void;
+      canUndo: () => boolean;
+      canRedo: () => boolean;
+      deleteStroke: (idx: number) => void;
+      setTool: (t: import('../app/src/tools/Tool').ToolType) => void;
+      getTool: () => import('../app/src/tools/Tool').ToolType;
     };
   }
 }
