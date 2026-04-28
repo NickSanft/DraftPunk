@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import * as Y from 'yjs';
 import type YPartyKitProvider from 'y-partykit/provider';
 import type { CanvasEngine, PerfMetrics } from './canvas/CanvasEngine';
@@ -16,7 +16,14 @@ import { Toolbar } from './components/Toolbar';
 import { UserList } from './components/UserList';
 import { ShareButton } from './components/ShareButton';
 import { colorForUser, nameForUser } from './utils/colors';
+import {
+  applyProjectUpdate,
+  downloadBlob,
+  encodeProject,
+  timestampSuffix,
+} from './utils/export';
 import type { ToolType } from './tools/Tool';
+import type { StrokeStyle } from './types/canvas';
 
 const PARTYKIT_HOST = import.meta.env.VITE_PARTYKIT_HOST ?? 'localhost:1999';
 
@@ -27,6 +34,13 @@ const EMPTY_METRICS: PerfMetrics = {
   activeRenderCount: 0,
   avgMainRenderMs: 0,
   mainRenderCount: 0,
+};
+
+const DEFAULT_PEN_STYLE: StrokeStyle = {
+  color: '#18181b',
+  width: 3,
+  opacity: 1,
+  lineCap: 'round',
 };
 
 function getRoomFromUrl(): string {
@@ -57,6 +71,7 @@ export function App() {
   const [engine, setEngine] = useState<CanvasEngine | null>(null);
   const [status, setStatus] = useState<Status>('connecting');
   const [toolType, setToolType] = useState<ToolType>('pen');
+  const [penStyle, setPenStyle] = useState<StrokeStyle>(DEFAULT_PEN_STYLE);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [strokeCount, setStrokeCount] = useState(0);
@@ -82,7 +97,6 @@ export function App() {
     };
   }, [provider]);
 
-  // Initial awareness state for self.
   useEffect(() => {
     if (!provider) return;
     provider.awareness.setLocalState({
@@ -97,13 +111,11 @@ export function App() {
     };
   }, [provider, userId]);
 
-  // Sync tool changes to awareness.
   useEffect(() => {
     if (!provider) return;
     provider.awareness.setLocalStateField('tool', toolType);
   }, [provider, toolType]);
 
-  // Subscribe to awareness changes for the user list.
   useEffect(() => {
     if (!provider) return;
     const update = () => setUsers(getAllAwareness(provider.awareness));
@@ -169,6 +181,46 @@ export function App() {
     return () => window.removeEventListener('keydown', handler);
   }, [undoManager]);
 
+  // Style controls — App owns pen style; CanvasView pushes to PenTool on change.
+  const handleColorChange = useCallback(
+    (color: string) => setPenStyle((s) => ({ ...s, color })),
+    [],
+  );
+  const handleWidthChange = useCallback(
+    (width: number) => setPenStyle((s) => ({ ...s, width })),
+    [],
+  );
+
+  // Export handlers.
+  const handleExportPng = useCallback(async () => {
+    if (!engine) return;
+    try {
+      const blob = await engine.exportPng();
+      downloadBlob(blob, `draft-punk-${room}-${timestampSuffix()}.png`);
+    } catch {
+      // toBlob failed — silent fallback. (Could surface a toast in the future.)
+    }
+  }, [engine, room]);
+
+  const handleSaveProject = useCallback(() => {
+    if (!doc) return;
+    const bytes = encodeProject(doc);
+    // Copy into a fresh ArrayBuffer; TS 5.7 narrowed BlobPart to exclude
+    // SharedArrayBuffer-backed views, so we can't pass a raw Uint8Array.
+    const ab = new ArrayBuffer(bytes.byteLength);
+    new Uint8Array(ab).set(bytes);
+    const blob = new Blob([ab], { type: 'application/octet-stream' });
+    downloadBlob(blob, `draft-punk-${room}-${timestampSuffix()}.draftpunk`);
+  }, [doc, room]);
+
+  const handleLoadProject = useCallback(
+    (bytes: Uint8Array) => {
+      if (!doc) return;
+      applyProjectUpdate(doc, bytes);
+    },
+    [doc],
+  );
+
   // Debug API (window.__draftPunk) — gated behind ?debug=1.
   useEffect(() => {
     if (!debug || !doc || !yStrokes || !undoManager || !provider) return;
@@ -192,6 +244,8 @@ export function App() {
       getAwarenessStates: () => getAllAwareness(provider.awareness),
       setCursor: (cursor) =>
         provider.awareness.setLocalStateField('cursor', cursor),
+      exportProject: () => encodeProject(doc),
+      importProject: (bytes) => applyProjectUpdate(doc, bytes),
     };
     return () => {
       delete window.__draftPunk;
@@ -209,6 +263,13 @@ export function App() {
           onRedo={() => undoManager?.redo()}
           canUndo={canUndo}
           canRedo={canRedo}
+          color={penStyle.color}
+          width={penStyle.width}
+          onColorChange={handleColorChange}
+          onWidthChange={handleWidthChange}
+          onExportPng={handleExportPng}
+          onSaveProject={handleSaveProject}
+          onLoadProject={handleLoadProject}
         />
         <div className="app-header-right">
           <UserList users={users} selfUserId={userId} />
@@ -222,6 +283,7 @@ export function App() {
             awareness={provider?.awareness ?? null}
             userId={userId}
             toolType={toolType}
+            penStyle={penStyle}
             onEngineReady={setEngine}
           />
         )}

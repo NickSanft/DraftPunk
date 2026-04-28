@@ -82,6 +82,61 @@ html, body, #root {
   margin: 0 0.35rem;
 }
 
+.style-picker {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.swatches {
+  display: inline-flex;
+  gap: 0.2rem;
+}
+
+.swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1.5px solid #fff;
+  outline: 1px solid var(--border);
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.1s;
+}
+
+.swatch:hover {
+  transform: scale(1.15);
+}
+
+.swatch.active {
+  outline: 2px solid var(--fg);
+  outline-offset: 1px;
+}
+
+.brush-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.brush-size-label {
+  min-width: 2.5em;
+  text-align: right;
+  font-family: ui-monospace, monospace;
+}
+
+.brush-size input[type='range'] {
+  width: 90px;
+}
+
+.export-menu {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
 .app-header-right {
   display: flex;
   align-items: center;

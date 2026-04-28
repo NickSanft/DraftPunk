@@ -85,6 +85,15 @@ export class CanvasEngine {
     return this.metrics;
   }
 
+  exportPng(): Promise<Blob> {
+    return new Promise((resolve, reject) => {
+      this.mainCanvas.toBlob((blob) => {
+        if (blob) resolve(blob);
+        else reject(new Error('Canvas.toBlob returned null'));
+      }, 'image/png');
+    });
+  }
+
   destroy(): void {
     this.destroyed = true;
     if (this.rafId !== null) {

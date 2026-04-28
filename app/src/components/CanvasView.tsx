@@ -7,19 +7,22 @@ import { StrokeSubscription } from '../crdt/subscription';
 import { getStrokes } from '../crdt/document';
 import { getRemoteAwareness } from '../crdt/awareness';
 import { createTool } from '../tools/createTool';
+import { PenTool } from '../tools/PenTool';
 import type { Tool, ToolContext, ToolType } from '../tools/Tool';
+import type { StrokeStyle } from '../types/canvas';
 
 interface Props {
   doc: Y.Doc;
   awareness: Awareness | null;
   userId: string;
   toolType: ToolType;
+  penStyle: StrokeStyle;
   onEngineReady?: (engine: CanvasEngine | null) => void;
 }
 
 const CURSOR_PUBLISH_INTERVAL_MS = 16; // ~60Hz cap
 
-export function CanvasView({ doc, awareness, userId, toolType, onEngineReady }: Props) {
+export function CanvasView({ doc, awareness, userId, toolType, penStyle, onEngineReady }: Props) {
   const mainRef = useRef<HTMLCanvasElement>(null);
   const activeRef = useRef<HTMLCanvasElement>(null);
   const cursorRef = useRef<HTMLCanvasElement>(null);
@@ -143,9 +146,22 @@ export function CanvasView({ doc, awareness, userId, toolType, onEngineReady }: 
     if (toolRef.current) {
       toolRef.current.onPointerCancel(ctx);
     }
-    toolRef.current = createTool(toolType, userId);
+    const tool = createTool(toolType, userId);
+    if (tool instanceof PenTool) {
+      tool.setStyle(penStyle);
+    }
+    toolRef.current = tool;
     ctx.engine.renderActive(null, null);
-  }, [toolType, userId]);
+  }, [toolType, userId, penStyle]);
+
+  // Apply pen style changes without recreating the tool — preserves any
+  // in-progress stroke (StrokeBuilder captures style at begin time, so a
+  // mid-stroke style change doesn't disturb the current stroke).
+  useEffect(() => {
+    if (toolRef.current instanceof PenTool) {
+      toolRef.current.setStyle(penStyle);
+    }
+  }, [penStyle]);
 
   const cursor = toolRef.current?.cursor ?? 'crosshair';
 

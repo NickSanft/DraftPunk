@@ -16,6 +16,8 @@ declare global {
       getTool: () => import('../app/src/tools/Tool').ToolType;
       getAwarenessStates: () => import('../app/src/crdt/awareness').UserAwareness[];
       setCursor: (c: { x: number; y: number } | null) => void;
+      exportProject: () => Uint8Array;
+      importProject: (bytes: Uint8Array) => void;
     };
   }
 }

@@ -23,5 +23,7 @@ interface Window {
     getTool: () => import('./tools/Tool').ToolType;
     getAwarenessStates: () => import('./crdt/awareness').UserAwareness[];
     setCursor: (c: { x: number; y: number } | null) => void;
+    exportProject: () => Uint8Array;
+    importProject: (bytes: Uint8Array) => void;
   };
 }
