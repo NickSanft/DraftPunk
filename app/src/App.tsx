@@ -11,6 +11,10 @@ function getRoomFromUrl(): string {
   return params.get('room') ?? 'draft-punk-default';
 }
 
+function isDebugMode(): boolean {
+  return new URLSearchParams(window.location.search).has('debug');
+}
+
 function getOrCreateUserId(): string {
   const existing = localStorage.getItem('draft-punk-userId');
   if (existing) return existing;
@@ -24,6 +28,7 @@ type Status = 'connecting' | 'connected' | 'disconnected';
 export function App() {
   const [room] = useState(getRoomFromUrl);
   const [userId] = useState(getOrCreateUserId);
+  const [debug] = useState(isDebugMode);
   const [doc, setDoc] = useState<Y.Doc | null>(null);
   const [provider, setProvider] = useState<YPartyKitProvider | null>(null);
   const [status, setStatus] = useState<Status>('connecting');
@@ -58,7 +63,7 @@ export function App() {
         </span>
       </header>
       <main className="app-canvas">
-        {doc && <CanvasView doc={doc} userId={userId} />}
+        {doc && <CanvasView doc={doc} userId={userId} debug={debug} />}
         <div className={`app-status ${status}`}>{status}</div>
       </main>
     </div>

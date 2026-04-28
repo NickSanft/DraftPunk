@@ -1,15 +1,18 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as Y from 'yjs';
-import { CanvasEngine } from '../canvas/CanvasEngine';
+import { CanvasEngine, type PerfMetrics } from '../canvas/CanvasEngine';
 import { fromPointerEvent } from '../input/PointerInputState';
 import { StrokeBuilder } from '../crdt/strokeBuilder';
 import { StrokeSubscription } from '../crdt/subscription';
 import { getStrokes, strokeToY } from '../crdt/document';
+import { clearStrokes, seedStrokes } from '../crdt/seed';
 import type { StrokeStyle } from '../types/canvas';
+import { DebugOverlay } from './DebugOverlay';
 
 interface Props {
   doc: Y.Doc;
   userId: string;
+  debug?: boolean;
 }
 
 const DEFAULT_STYLE: StrokeStyle = {
@@ -19,9 +22,20 @@ const DEFAULT_STYLE: StrokeStyle = {
   lineCap: 'round',
 };
 
-export function CanvasView({ doc, userId }: Props) {
+const EMPTY_METRICS: PerfMetrics = {
+  lastMainRenderMs: 0,
+  lastActiveRenderMs: 0,
+  avgMainRenderMs: 0,
+  mainRenderCount: 0,
+};
+
+export function CanvasView({ doc, userId, debug }: Props) {
   const mainRef = useRef<HTMLCanvasElement>(null);
   const activeRef = useRef<HTMLCanvasElement>(null);
+  const engineRef = useRef<CanvasEngine | null>(null);
+  const [strokeCount, setStrokeCount] = useState(0);
+
+  const yStrokes = useMemo(() => getStrokes(doc), [doc]);
 
   useEffect(() => {
     const mainCanvas = mainRef.current;
@@ -29,16 +43,14 @@ export function CanvasView({ doc, userId }: Props) {
     if (!mainCanvas || !activeCanvas) return;
 
     const engine = new CanvasEngine(mainCanvas, activeCanvas);
+    engineRef.current = engine;
     const builder = new StrokeBuilder(userId);
-    const yStrokes = getStrokes(doc);
     const subscription = new StrokeSubscription(yStrokes);
 
     const fitToParent = () => {
       const parent = mainCanvas.parentElement;
       if (!parent) return;
-      const w = parent.clientWidth;
-      const h = parent.clientHeight;
-      engine.setSize(w, h);
+      engine.setSize(parent.clientWidth, parent.clientHeight);
       engine.renderCommitted(subscription.getStrokes());
     };
     fitToParent();
@@ -46,6 +58,7 @@ export function CanvasView({ doc, userId }: Props) {
 
     const unsubscribe = subscription.subscribe((strokes) => {
       engine.renderCommitted(strokes);
+      setStrokeCount(strokes.length);
     });
 
     const onPointerDown = (e: PointerEvent) => {
@@ -83,7 +96,7 @@ export function CanvasView({ doc, userId }: Props) {
       try {
         activeCanvas.releasePointerCapture(e.pointerId);
       } catch {
-        // ignore — pointer may have already been released
+        // pointer may already be released
       }
       const stroke = builder.commit();
       engine.renderActive(null, null);
@@ -110,13 +123,25 @@ export function CanvasView({ doc, userId }: Props) {
       activeCanvas.removeEventListener('pointermove', onPointerMove);
       activeCanvas.removeEventListener('pointerup', onPointerUp);
       activeCanvas.removeEventListener('pointercancel', onPointerCancel);
+      engine.destroy();
+      engineRef.current = null;
     };
-  }, [doc, userId]);
+  }, [doc, userId, yStrokes]);
 
   return (
-    <div className="canvas-stack">
-      <canvas ref={mainRef} className="canvas-layer committed" />
-      <canvas ref={activeRef} className="canvas-layer active" />
-    </div>
+    <>
+      <div className="canvas-stack">
+        <canvas ref={mainRef} className="canvas-layer committed" />
+        <canvas ref={activeRef} className="canvas-layer active" />
+      </div>
+      {debug && (
+        <DebugOverlay
+          getMetrics={() => engineRef.current?.getMetrics() ?? EMPTY_METRICS}
+          strokeCount={strokeCount}
+          onSeed={(n) => seedStrokes(yStrokes, doc, n)}
+          onClear={() => clearStrokes(yStrokes, doc)}
+        />
+      )}
+    </>
   );
 }

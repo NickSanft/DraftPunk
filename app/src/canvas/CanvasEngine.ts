@@ -1,10 +1,32 @@
 import type { Point, Stroke, StrokeStyle } from '../types/canvas';
 import { renderAll, renderStroke } from './Renderer';
 
+export interface PerfMetrics {
+  lastMainRenderMs: number;
+  lastActiveRenderMs: number;
+  avgMainRenderMs: number;
+  mainRenderCount: number;
+}
+
+const AVG_WINDOW = 30;
+
 export class CanvasEngine {
   private readonly mainCtx: CanvasRenderingContext2D;
   private readonly activeCtx: CanvasRenderingContext2D;
   private dpr = 1;
+
+  private pendingMain: { strokes: readonly Stroke[] } | null = null;
+  private pendingActive: { points: readonly Point[] | null; style: StrokeStyle | null } | null = null;
+  private rafId: number | null = null;
+  private destroyed = false;
+
+  private readonly mainTimings: number[] = [];
+  private readonly metrics: PerfMetrics = {
+    lastMainRenderMs: 0,
+    lastActiveRenderMs: 0,
+    avgMainRenderMs: 0,
+    mainRenderCount: 0,
+  };
 
   constructor(
     private readonly mainCanvas: HTMLCanvasElement,
@@ -30,15 +52,70 @@ export class CanvasEngine {
   }
 
   renderCommitted(strokes: readonly Stroke[]): void {
-    this.clear(this.mainCtx, this.mainCanvas);
-    renderAll(this.mainCtx, strokes);
+    if (this.destroyed) return;
+    this.pendingMain = { strokes };
+    this.scheduleFlush();
   }
 
   renderActive(points: readonly Point[] | null, style: StrokeStyle | null): void {
-    this.clear(this.activeCtx, this.activeCanvas);
-    if (points && style && points.length > 0) {
-      renderStroke(this.activeCtx, points, style);
+    if (this.destroyed) return;
+    this.pendingActive = { points, style };
+    this.scheduleFlush();
+  }
+
+  getMetrics(): PerfMetrics {
+    return this.metrics;
+  }
+
+  destroy(): void {
+    this.destroyed = true;
+    if (this.rafId !== null) {
+      cancelAnimationFrame(this.rafId);
+      this.rafId = null;
     }
+    this.pendingMain = null;
+    this.pendingActive = null;
+  }
+
+  private scheduleFlush(): void {
+    if (this.rafId !== null) return;
+    this.rafId = requestAnimationFrame(() => {
+      this.rafId = null;
+      this.flush();
+    });
+  }
+
+  private flush(): void {
+    if (this.destroyed) return;
+
+    if (this.pendingMain) {
+      const t0 = performance.now();
+      this.clear(this.mainCtx, this.mainCanvas);
+      renderAll(this.mainCtx, this.pendingMain.strokes);
+      this.recordMainTiming(performance.now() - t0);
+      this.pendingMain = null;
+    }
+
+    if (this.pendingActive) {
+      const t0 = performance.now();
+      this.clear(this.activeCtx, this.activeCanvas);
+      const { points, style } = this.pendingActive;
+      if (points && style && points.length > 0) {
+        renderStroke(this.activeCtx, points, style);
+      }
+      this.metrics.lastActiveRenderMs = performance.now() - t0;
+      this.pendingActive = null;
+    }
+  }
+
+  private recordMainTiming(ms: number): void {
+    this.metrics.lastMainRenderMs = ms;
+    this.metrics.mainRenderCount++;
+    this.mainTimings.push(ms);
+    if (this.mainTimings.length > AVG_WINDOW) this.mainTimings.shift();
+    let sum = 0;
+    for (const t of this.mainTimings) sum += t;
+    this.metrics.avgMainRenderMs = sum / this.mainTimings.length;
   }
 
   private clear(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement): void {
