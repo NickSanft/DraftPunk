@@ -59,8 +59,15 @@
   <button id="clear" disabled>Clear log</button>
 </div>
 
+<h2>Signaling server reachability</h2>
+<p class="meta">Raw WebSocket probe of each default signaling URL — bypasses y-webrtc to isolate signaling failures from WebRTC failures.</p>
+<div class="row">
+  <button id="probe">Probe signaling servers</button>
+</div>
+<pre id="probeResults" style="background: #f4f4f5; color: #18181b; max-height: 200px;">click "Probe signaling servers"</pre>
+
 <div class="row meta">
-  <span>Connected: <span class="stat no" id="connected">no</span></span>
+  <span title="y-webrtc 'status' event — reflects provider init, NOT actual signaling reachability. Use the probe below for the real test.">Provider init: <span class="stat no" id="connected">no</span></span>
   <span>·</span>
   <span>WebRTC peers: <span class="stat" id="peers-rtc">0</span></span>
   <span>·</span>
@@ -224,6 +231,43 @@ $('add100').addEventListener('click', () => {
 });
 
 $('clear').addEventListener('click', () => { logEl.textContent = ''; });
+
+const SIGNALING_URLS = [
+  'wss://signaling.yjs.dev',
+  'wss://y-webrtc-signaling-eu.herokuapp.com',
+  'wss://y-webrtc-signaling-us.herokuapp.com',
+];
+
+const probeWs = (url) => new Promise((resolve) => {
+  const t0 = performance.now();
+  let done = false;
+  const finish = (result) => {
+    if (done) return;
+    done = true;
+    try { ws.close(); } catch (_) {}
+    resolve({ url, ...result, elapsed: Math.round(performance.now() - t0) });
+  };
+  let ws;
+  try {
+    ws = new WebSocket(url);
+  } catch (err) {
+    return finish({ status: 'threw', error: err.message });
+  }
+  ws.onopen = () => finish({ status: 'OPEN' });
+  ws.onerror = () => finish({ status: 'ERROR', error: 'connection failed (see console for details)' });
+  ws.onclose = (e) => finish({ status: 'CLOSED', error: `code=${e.code} reason="${e.reason || '(none)'}"` });
+  setTimeout(() => finish({ status: 'TIMEOUT', error: 'no response in 5s' }), 5000);
+});
+
+$('probe').addEventListener('click', async () => {
+  const out = $('probeResults');
+  out.textContent = 'probing...\n';
+  const results = await Promise.all(SIGNALING_URLS.map(probeWs));
+  out.textContent = results.map(r =>
+    `[${r.status.padEnd(7)}] ${r.url}  (${r.elapsed}ms)${r.error ? '  — ' + r.error : ''}`
+  ).join('\n');
+  log(`signaling probe: ${results.filter(r => r.status === 'OPEN').length}/${results.length} servers reachable`);
+});
 
 if (params.get('room')) join();
 </script>
