@@ -1,0 +1,19 @@
+{
+  "name": "draft-punk-server",
+  "version": "0.0.0",
+  "private": true,
+  "description": "PartyKit (Cloudflare Durable Objects) sync layer for Draft Punk.",
+  "scripts": {
+    "dev": "partykit dev",
+    "deploy": "partykit deploy",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "y-partykit": "^0.0.33",
+    "yjs": "^13.6.20"
+  },
+  "devDependencies": {
+    "partykit": "^0.0.115",
+    "typescript": "^5.4.0"
+  }
+}
