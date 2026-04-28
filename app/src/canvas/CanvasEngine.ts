@@ -4,6 +4,8 @@ import { renderAll, renderStroke } from './Renderer';
 export interface PerfMetrics {
   lastMainRenderMs: number;
   lastActiveRenderMs: number;
+  maxActiveRenderMs: number;
+  activeRenderCount: number;
   avgMainRenderMs: number;
   mainRenderCount: number;
 }
@@ -24,6 +26,8 @@ export class CanvasEngine {
   private readonly metrics: PerfMetrics = {
     lastMainRenderMs: 0,
     lastActiveRenderMs: 0,
+    maxActiveRenderMs: 0,
+    activeRenderCount: 0,
     avgMainRenderMs: 0,
     mainRenderCount: 0,
   };
@@ -100,10 +104,20 @@ export class CanvasEngine {
       const t0 = performance.now();
       this.clear(this.activeCtx, this.activeCanvas);
       const { points, style } = this.pendingActive;
-      if (points && style && points.length > 0) {
-        renderStroke(this.activeCtx, points, style);
+      const hasContent = !!(points && style && points.length > 0);
+      if (hasContent) {
+        renderStroke(this.activeCtx, points!, style!);
       }
-      this.metrics.lastActiveRenderMs = performance.now() - t0;
+      const dt = performance.now() - t0;
+      this.metrics.lastActiveRenderMs = dt;
+      // Only count "real" renders (with content) toward max + count, so the
+      // post-pointerup cleanup render doesn't dilute the measurement.
+      if (hasContent) {
+        this.metrics.activeRenderCount++;
+        if (dt > this.metrics.maxActiveRenderMs) {
+          this.metrics.maxActiveRenderMs = dt;
+        }
+      }
       this.pendingActive = null;
     }
   }

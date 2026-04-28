@@ -7,3 +7,12 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+interface Window {
+  __draftPunk?: {
+    seed: (n: number) => void;
+    clear: () => void;
+    getStrokeCount: () => number;
+    getMetrics: () => import('./canvas/CanvasEngine').PerfMetrics;
+  };
+}

@@ -25,6 +25,8 @@ const DEFAULT_STYLE: StrokeStyle = {
 const EMPTY_METRICS: PerfMetrics = {
   lastMainRenderMs: 0,
   lastActiveRenderMs: 0,
+  maxActiveRenderMs: 0,
+  activeRenderCount: 0,
   avgMainRenderMs: 0,
   mainRenderCount: 0,
 };
@@ -36,6 +38,19 @@ export function CanvasView({ doc, userId, debug }: Props) {
   const [strokeCount, setStrokeCount] = useState(0);
 
   const yStrokes = useMemo(() => getStrokes(doc), [doc]);
+
+  useEffect(() => {
+    if (!debug) return;
+    window.__draftPunk = {
+      seed: (n) => seedStrokes(yStrokes, doc, n),
+      clear: () => clearStrokes(yStrokes, doc),
+      getStrokeCount: () => yStrokes.length,
+      getMetrics: () => engineRef.current?.getMetrics() ?? EMPTY_METRICS,
+    };
+    return () => {
+      delete window.__draftPunk;
+    };
+  }, [debug, doc, yStrokes]);
 
   useEffect(() => {
     const mainCanvas = mainRef.current;

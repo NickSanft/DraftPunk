@@ -4,7 +4,7 @@
   "private": true,
   "description": "PartyKit (Cloudflare Durable Objects) sync layer for Draft Punk.",
   "scripts": {
-    "dev": "partykit dev",
+    "dev": "partykit dev --port 1999",
     "deploy": "partykit deploy",
     "typecheck": "tsc --noEmit"
   },

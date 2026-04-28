@@ -24,6 +24,24 @@ npm run dev --prefix app
 
 Open `http://localhost:5173/?room=demo` in two browser windows. Draw in either; the other receives the strokes.
 
+## Tests
+
+End-to-end tests use Playwright. They auto-start both dev servers via `playwright.config.ts` so you don't need to run them yourself.
+
+```bash
+# One-time: install Playwright + chromium
+npm install
+npm run test:e2e:install
+
+# Run tests
+npm run test:e2e            # headless
+npm run test:e2e:ui         # Playwright UI mode
+```
+
+Tests covered:
+- `e2e/sync.spec.ts` — round-trip sync, late-joiner state recovery from the Durable Object snapshot
+- `e2e/perf.spec.ts` — 1000-stroke main-canvas render budget (< 50ms), active-stroke render during a drag (< 16ms)
+
 ## Layout
 
 ```

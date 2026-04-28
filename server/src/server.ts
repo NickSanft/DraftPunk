@@ -9,4 +9,11 @@ export default class DraftPunkServer implements Party.Server {
       persist: { mode: "snapshot" },
     });
   }
+
+  async onRequest() {
+    return new Response("draft-punk sync server ok\n", {
+      status: 200,
+      headers: { "content-type": "text/plain" },
+    });
+  }
 }
