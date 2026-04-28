@@ -1,0 +1,18 @@
+{
+  "name": "draft-punk-spike-s1b-partykit",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Spike: validate y-partykit syncs Y.Doc updates between two browsers and persists state for late joiners.",
+  "scripts": {
+    "dev": "partykit dev",
+    "deploy": "partykit deploy"
+  },
+  "devDependencies": {
+    "partykit": "latest",
+    "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "y-partykit": "latest",
+    "yjs": "^13.6.20"
+  }
+}

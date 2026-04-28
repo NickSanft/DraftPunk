@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Spike S1b: y-partykit sync</title>
+<style>
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; max-width: 760px; margin: 2rem auto; padding: 0 1rem; color: #18181b; }
+  h1 { font-size: 1.15rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1rem; margin-top: 1.5rem; }
+  .sub { color: #71717a; margin-top: 0; }
+  .warn { background: #fef3c7; border-left: 4px solid #f59e0b; padding: 0.75rem 1rem; margin: 1rem 0; font-size: 0.9rem; }
+  .ok   { background: #d1fae5; border-left: 4px solid #10b981; padding: 0.75rem 1rem; margin: 1rem 0; font-size: 0.9rem; }
+  .share { background: #eff6ff; border-left: 4px solid #3b82f6; padding: 0.75rem 1rem; margin: 1rem 0; font-size: 0.9rem; word-break: break-all; }
+  .share code { background: #dbeafe; padding: 0.15rem 0.35rem; border-radius: 3px; }
+  button { padding: 0.45rem 0.9rem; font-size: 0.95rem; cursor: pointer; border: 1px solid #d4d4d8; background: #fafafa; border-radius: 4px; }
+  button:hover:not(:disabled) { background: #f4f4f5; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  pre { background: #18181b; color: #e4e4e7; padding: 0.75rem; overflow: auto; max-height: 320px; font-size: 0.8rem; line-height: 1.45; border-radius: 4px; }
+  .row { display: flex; gap: 0.5rem; align-items: center; margin: 0.5rem 0; flex-wrap: wrap; }
+  .stat { font-weight: bold; }
+  .stat.yes { color: #059669; }
+  .stat.no  { color: #b91c1c; }
+  input { padding: 0.4rem 0.6rem; font-size: 0.95rem; flex: 1; min-width: 200px; border: 1px solid #d4d4d8; border-radius: 4px; }
+  label { font-weight: bold; }
+  .meta { font-size: 0.85rem; color: #52525b; }
+  ol li { margin: 0.25rem 0; }
+</style>
+</head>
+<body>
+
+<h1>Spike S1b — y-partykit + Cloudflare Durable Objects</h1>
+<p class="sub">Validates: (a) two browsers sync via PartyKit, (b) late joiners get full state for free, (c) state survives client refresh and server restart.</p>
+
+<div class="warn">
+  <strong>How to run:</strong>
+  <ol>
+    <li>From <code>spikes/s1b-partykit/</code>, run <code>npm install</code> once, then <code>npm run dev</code>.</li>
+    <li>Open <a href="http://localhost:1999/">http://localhost:1999/</a> in two browser windows. Any combination — PartyKit doesn't have S1's BroadcastChannel confusion. Click <strong>Join</strong> in both.</li>
+    <li>Click <strong>Add stroke</strong> in either; it appears in the other within ~100ms.</li>
+  </ol>
+  <strong>The tests that S1 couldn't do:</strong>
+  <ol>
+    <li><strong>Late-joiner:</strong> add 5 strokes in window A, then open a NEW third window — it should immediately receive all 5 strokes.</li>
+    <li><strong>Server-restart persistence:</strong> stop the server (Ctrl+C in the terminal), start it again, refresh both windows. Strokes should still be there (Durable Object snapshot persistence).</li>
+    <li><strong>All-clients-disconnected persistence:</strong> close both windows, wait 30s, reopen — strokes still there.</li>
+  </ol>
+</div>
+
+<div class="share">
+  <strong>Current room URL (share with second window):</strong><br />
+  <code id="shareUrl">—</code>
+  &nbsp;<button id="copyUrl" style="font-size: 0.8rem; padding: 0.2rem 0.5rem;">Copy</button>
+</div>
+
+<div class="row">
+  <label for="room">Room:</label>
+  <input id="room" />
+  <button id="join">Join</button>
+  <button id="leave" disabled>Leave</button>
+</div>
+
+<div class="row">
+  <button id="add" disabled>Add 1 stroke</button>
+  <button id="add100" disabled>Add 100 strokes (transaction)</button>
+  <button id="clear" disabled>Clear log</button>
+</div>
+
+<div class="row meta">
+  <span>WS status: <span class="stat no" id="wsStatus">disconnected</span></span>
+  <span>·</span>
+  <span>Strokes: <span class="stat" id="count">0</span></span>
+  <span>·</span>
+  <span>clientID: <span class="stat" id="cid">—</span></span>
+</div>
+
+<h2>Event log (newest first)</h2>
+<pre id="log"></pre>
+
+<script type="module">
+import * as Y from 'https://esm.sh/yjs@13.6.20';
+import YPartyKitProvider from 'https://esm.sh/y-partykit@0/provider?deps=yjs@13.6.20';
+
+const $ = id => document.getElementById(id);
+const logEl = $('log');
+
+const log = (msg) => {
+  const ts = new Date().toISOString().slice(11, 23);
+  logEl.textContent = `[${ts}] ${msg}\n` + logEl.textContent;
+};
+
+const params = new URLSearchParams(location.hash.slice(1));
+const initialRoom = params.get('room') || 'draft-punk-spike-default';
+$('room').value = initialRoom;
+location.hash = 'room=' + initialRoom;
+
+const updateShareUrl = () => {
+  const room = $('room').value.trim();
+  const url = `${location.origin}${location.pathname}#room=${room}`;
+  $('shareUrl').textContent = url;
+};
+updateShareUrl();
+$('room').addEventListener('input', updateShareUrl);
+
+$('copyUrl').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText($('shareUrl').textContent);
+    $('copyUrl').textContent = 'Copied!';
+    setTimeout(() => { $('copyUrl').textContent = 'Copy'; }, 1500);
+  } catch (err) {
+    log('clipboard write failed: ' + err.message);
+  }
+});
+
+let ydoc = null;
+let provider = null;
+let yStrokes = null;
+
+const setStatus = (status) => {
+  const el = $('wsStatus');
+  el.textContent = status;
+  el.className = 'stat ' + (status === 'connected' ? 'yes' : 'no');
+};
+
+const join = () => {
+  const room = $('room').value.trim();
+  if (!room) return;
+  location.hash = 'room=' + room;
+
+  if (provider) leave();
+
+  ydoc = new Y.Doc();
+  yStrokes = ydoc.getArray('strokes');
+  $('cid').textContent = ydoc.clientID;
+
+  provider = new YPartyKitProvider(location.host, room, ydoc);
+
+  log(`joining room "${room}" via ${location.host} (clientID ${ydoc.clientID})`);
+
+  yStrokes.observe(e => {
+    let added = 0, deleted = 0;
+    e.changes.delta.forEach(d => {
+      if (d.insert) added += d.insert.length;
+      if (d.delete) deleted += d.delete;
+    });
+    log(`yStrokes change: +${added} -${deleted} (total ${yStrokes.length})`);
+    $('count').textContent = yStrokes.length;
+  });
+
+  provider.on('status', (e) => {
+    setStatus(e.status);
+    log(`provider status: ${e.status}`);
+  });
+
+  provider.on('synced', (e) => {
+    log(`synced: ${e ? 'true' : 'false'} (initial state from server received)`);
+  });
+
+  $('count').textContent = yStrokes.length;
+  $('add').disabled = false;
+  $('add100').disabled = false;
+  $('clear').disabled = false;
+  $('leave').disabled = false;
+  $('join').disabled = true;
+};
+
+const leave = () => {
+  if (provider) {
+    provider.disconnect();
+    provider.destroy();
+    provider = null;
+    log('disconnected from provider');
+  }
+  if (ydoc) { ydoc.destroy(); ydoc = null; }
+  yStrokes = null;
+  setStatus('disconnected');
+  $('count').textContent = '0';
+  $('cid').textContent = '—';
+  $('add').disabled = true;
+  $('add100').disabled = true;
+  $('leave').disabled = true;
+  $('join').disabled = false;
+};
+
+const makeStroke = (color, points) => {
+  const stroke = new Y.Map();
+  stroke.set('id', Math.random().toString(36).slice(2, 9));
+  stroke.set('color', color);
+  const pts = new Y.Array();
+  pts.push(points);
+  stroke.set('points', pts);
+  return stroke;
+};
+
+$('join').addEventListener('click', join);
+$('leave').addEventListener('click', leave);
+
+$('add').addEventListener('click', () => {
+  const color = '#' + Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0');
+  yStrokes.push([makeStroke(color, [{ x: Math.random() * 500, y: Math.random() * 500 }])]);
+});
+
+$('add100').addEventListener('click', () => {
+  const t0 = performance.now();
+  ydoc.transact(() => {
+    for (let i = 0; i < 100; i++) {
+      const points = [];
+      for (let j = 0; j < 50; j++) points.push({ x: j * 5, y: i * 5 });
+      yStrokes.push([makeStroke('#000000', points)]);
+    }
+  });
+  log(`added 100 strokes × 50 points in ${(performance.now() - t0).toFixed(1)}ms (local)`);
+});
+
+$('clear').addEventListener('click', () => { logEl.textContent = ''; });
+
+if (params.get('room')) join();
+</script>
+
+</body>
+</html>
