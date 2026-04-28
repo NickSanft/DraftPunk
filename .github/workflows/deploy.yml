@@ -31,6 +31,19 @@ jobs:
         working-directory: app
         run: npm ci
 
+      - name: Verify PartyKit host is configured
+        env:
+          VITE_PARTYKIT_HOST: ${{ vars.VITE_PARTYKIT_HOST }}
+        run: |
+          if [ -z "$VITE_PARTYKIT_HOST" ]; then
+            echo "::error::VITE_PARTYKIT_HOST repo variable is not set."
+            echo "Set it in: Settings → Secrets and variables → Actions → Variables → New repository variable"
+            echo "Value should be the hostname printed by 'npx partykit deploy' (no scheme, no slash),"
+            echo "eg: draft-punk.your-username.partykit.dev"
+            exit 1
+          fi
+          echo "VITE_PARTYKIT_HOST=$VITE_PARTYKIT_HOST"
+
       - name: Typecheck
         working-directory: app
         run: npm run typecheck

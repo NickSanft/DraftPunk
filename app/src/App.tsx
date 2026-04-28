@@ -25,7 +25,23 @@ import {
 import type { ToolType } from './tools/Tool';
 import type { StrokeStyle } from './types/canvas';
 
-const PARTYKIT_HOST = import.meta.env.VITE_PARTYKIT_HOST ?? 'localhost:1999';
+// `||` not `??` — VITE_PARTYKIT_HOST being an empty string (eg from an
+// unset CI variable substituted as "") should fall through to the dev
+// default, not produce a broken `wss:///parties/...` URL.
+const PARTYKIT_HOST = import.meta.env.VITE_PARTYKIT_HOST?.trim() || 'localhost:1999';
+
+if (
+  PARTYKIT_HOST === 'localhost:1999' &&
+  typeof window !== 'undefined' &&
+  window.location.hostname !== 'localhost' &&
+  window.location.hostname !== '127.0.0.1'
+) {
+  // eslint-disable-next-line no-console
+  console.error(
+    '[draft-punk] VITE_PARTYKIT_HOST is not set in this build. Sync will fail. ' +
+      'In GitHub: Settings → Secrets and variables → Actions → Variables → VITE_PARTYKIT_HOST',
+  );
+}
 
 const EMPTY_METRICS: PerfMetrics = {
   lastMainRenderMs: 0,
