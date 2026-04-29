@@ -23,16 +23,17 @@ interface Props {
 
 const CURSOR_PUBLISH_INTERVAL_MS = 16;
 
-// Pen styluses report their flipped (eraser) end via PointerEvent.button === 5
-// on pointerdown. Some report -1 with the eraser bit in `buttons` instead.
 function isPenEraser(e: PointerEvent): boolean {
   if (e.pointerType !== 'pen') return false;
   if (e.button === 5) return true;
-  // Fallback for drivers that don't set button=5: eraser bit (32) is set
-  // and primary button (1) is NOT set.
   if ((e.buttons & 32) === 32 && (e.buttons & 1) === 0) return true;
   return false;
 }
+
+const CANVAS_ARIA_LABEL =
+  'Collaborative drawing canvas. Use the toolbar to choose tools, colors, and brush size. ' +
+  'Drawing requires a pointer device. Stroke contents are visible only to sighted users; ' +
+  'tool changes, undo, and connection updates are announced.';
 
 export function CanvasView({ doc, awareness, userId, toolType, penStyle, onEngineReady }: Props) {
   const mainRef = useRef<HTMLCanvasElement>(null);
@@ -90,12 +91,10 @@ export function CanvasView({ doc, awareness, userId, toolType, penStyle, onEngin
       try {
         activeCanvas.setPointerCapture(e.pointerId);
       } catch {
-        // Synthetic events with non-active pointerIds can throw. Don't let
-        // that block the tool dispatch below.
+        // Synthetic events with non-active pointerIds can throw.
       }
       const input = fromPointerEvent(e, activeCanvas);
       publishCursor(input.x, input.y);
-      // Pen-flip: stylus eraser end always erases regardless of selected tool.
       const tool = isPenEraser(e) ? eraserToolRef.current : toolRef.current;
       activeGestureToolRef.current = tool;
       tool?.onPointerDown(input, ctxRef.current);
@@ -186,10 +185,22 @@ export function CanvasView({ doc, awareness, userId, toolType, penStyle, onEngin
   const cursor = toolRef.current?.cursor ?? 'crosshair';
 
   return (
-    <div className="canvas-stack">
-      <canvas ref={mainRef} className="canvas-layer committed" />
-      <canvas ref={activeRef} className="canvas-layer active" style={{ cursor }} />
-      <canvas ref={cursorRef} className="canvas-layer cursors" />
+    <div
+      className="canvas-stack"
+      id="draft-punk-canvas"
+      tabIndex={-1}
+      role="region"
+      aria-label="Drawing area"
+    >
+      <canvas ref={mainRef} className="canvas-layer committed" aria-hidden />
+      <canvas
+        ref={activeRef}
+        className="canvas-layer active"
+        style={{ cursor }}
+        tabIndex={0}
+        aria-label={CANVAS_ARIA_LABEL}
+      />
+      <canvas ref={cursorRef} className="canvas-layer cursors" aria-hidden />
     </div>
   );
 }

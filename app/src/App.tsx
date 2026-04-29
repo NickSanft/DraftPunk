@@ -1,21 +1,22 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as Y from 'yjs';
 import type YPartyKitProvider from 'y-partykit/provider';
 import type { CanvasEngine, PerfMetrics } from './canvas/CanvasEngine';
 import { connect } from './crdt/provider';
-import { getStrokes } from './crdt/document';
+import { getStrokes, yToStroke } from './crdt/document';
 import { clearStrokes, seedStrokes } from './crdt/seed';
 import { createUndoManager } from './crdt/undoManager';
 import {
   getAllAwareness,
   type UserAwareness,
 } from './crdt/awareness';
-import { yToStroke } from './crdt/document';
 import { CanvasView } from './components/CanvasView';
 import { DebugOverlay } from './components/DebugOverlay';
 import { Toolbar } from './components/Toolbar';
 import { UserList } from './components/UserList';
 import { ShareButton } from './components/ShareButton';
+import { Announcer, EMPTY_MESSAGE, type AnnouncerMessage } from './components/Announcer';
+import { SkipLink } from './components/SkipLink';
 import { colorForUser, nameForUser } from './utils/colors';
 import {
   applyProjectUpdate,
@@ -26,13 +27,11 @@ import {
 import type { ToolType } from './tools/Tool';
 import type { StrokeStyle } from './types/canvas';
 
-// `||` not `??` — VITE_PARTYKIT_HOST being an empty string (eg from an
-// unset CI variable substituted as "") should fall through to the dev
-// default, not produce a broken `wss:///parties/...` URL.
-const PARTYKIT_HOST = import.meta.env.VITE_PARTYKIT_HOST?.trim() || 'localhost:1999';
+const PARTYKIT_HOST_RAW = import.meta.env.VITE_PARTYKIT_HOST?.trim();
+const PARTYKIT_HOST = PARTYKIT_HOST_RAW || 'localhost:1999';
 
 if (
-  PARTYKIT_HOST === 'localhost:1999' &&
+  !PARTYKIT_HOST_RAW &&
   typeof window !== 'undefined' &&
   window.location.hostname !== 'localhost' &&
   window.location.hostname !== '127.0.0.1'
@@ -93,6 +92,16 @@ export function App() {
   const [canRedo, setCanRedo] = useState(false);
   const [strokeCount, setStrokeCount] = useState(0);
   const [users, setUsers] = useState<UserAwareness[]>([]);
+
+  const [politeMessage, setPoliteMessage] = useState<AnnouncerMessage>(EMPTY_MESSAGE);
+  const [assertiveMessage, setAssertiveMessage] = useState<AnnouncerMessage>(EMPTY_MESSAGE);
+  const announce = useCallback(
+    (msg: string, priority: 'polite' | 'assertive' = 'polite') => {
+      const setter = priority === 'assertive' ? setAssertiveMessage : setPoliteMessage;
+      setter((prev) => ({ msg, tick: prev.tick + 1 }));
+    },
+    [],
+  );
 
   useEffect(() => {
     const handle = connect(PARTYKIT_HOST, room);
@@ -172,6 +181,47 @@ export function App() {
     return () => yStrokes.unobserve(update);
   }, [yStrokes]);
 
+  // ===== a11y announcements =====
+
+  // Skip the first render — we don't want a "Tool: pen" announcement on load.
+  const isFirstToolRender = useRef(true);
+  useEffect(() => {
+    if (isFirstToolRender.current) {
+      isFirstToolRender.current = false;
+      return;
+    }
+    announce(`Tool: ${toolType}`);
+  }, [toolType, announce]);
+
+  const isFirstStatusRender = useRef(true);
+  useEffect(() => {
+    if (isFirstStatusRender.current) {
+      isFirstStatusRender.current = false;
+      return;
+    }
+    if (status === 'connected') announce('Connected to room', 'assertive');
+    else if (status === 'disconnected') announce('Disconnected', 'assertive');
+    else if (status === 'connecting') announce('Reconnecting');
+  }, [status, announce]);
+
+  const prevUsersRef = useRef<UserAwareness[]>([]);
+  useEffect(() => {
+    const prev = prevUsersRef.current;
+    for (const u of users) {
+      if (u.userId === userId) continue;
+      if (!prev.find((p) => p.userId === u.userId)) {
+        announce(`${u.name} joined`);
+      }
+    }
+    for (const u of prev) {
+      if (u.userId === userId) continue;
+      if (!users.find((c) => c.userId === u.userId)) {
+        announce(`${u.name} left`);
+      }
+    }
+    prevUsersRef.current = users;
+  }, [users, userId, announce]);
+
   // Keyboard shortcuts.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -182,11 +232,17 @@ export function App() {
         const key = e.key.toLowerCase();
         if (key === 'z') {
           e.preventDefault();
-          if (e.shiftKey) undoManager?.redo();
-          else undoManager?.undo();
+          if (e.shiftKey) {
+            undoManager?.redo();
+            announce('Redid last edit');
+          } else {
+            undoManager?.undo();
+            announce('Undid last edit');
+          }
         } else if (key === 'y') {
           e.preventDefault();
           undoManager?.redo();
+          announce('Redid last edit');
         }
         return;
       }
@@ -196,9 +252,8 @@ export function App() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [undoManager]);
+  }, [undoManager, announce]);
 
-  // Style controls — App owns pen style; CanvasView pushes to PenTool on change.
   const handleColorChange = useCallback(
     (color: string) => setPenStyle((s) => ({ ...s, color })),
     [],
@@ -208,34 +263,34 @@ export function App() {
     [],
   );
 
-  // Export handlers.
   const handleExportPng = useCallback(async () => {
     if (!engine) return;
     try {
       const blob = await engine.exportPng();
       downloadBlob(blob, `draft-punk-${room}-${timestampSuffix()}.png`);
+      announce('Canvas exported as PNG');
     } catch {
-      // toBlob failed — silent fallback. (Could surface a toast in the future.)
+      announce('Export failed', 'assertive');
     }
-  }, [engine, room]);
+  }, [engine, room, announce]);
 
   const handleSaveProject = useCallback(() => {
     if (!doc) return;
     const bytes = encodeProject(doc);
-    // Copy into a fresh ArrayBuffer; TS 5.7 narrowed BlobPart to exclude
-    // SharedArrayBuffer-backed views, so we can't pass a raw Uint8Array.
     const ab = new ArrayBuffer(bytes.byteLength);
     new Uint8Array(ab).set(bytes);
     const blob = new Blob([ab], { type: 'application/octet-stream' });
     downloadBlob(blob, `draft-punk-${room}-${timestampSuffix()}.draftpunk`);
-  }, [doc, room]);
+    announce('Project saved');
+  }, [doc, room, announce]);
 
   const handleLoadProject = useCallback(
     (bytes: Uint8Array) => {
       if (!doc) return;
       applyProjectUpdate(doc, bytes);
+      announce('Project loaded');
     },
-    [doc],
+    [doc, announce],
   );
 
   // Debug API (window.__draftPunk) — gated behind ?debug=1.
@@ -272,7 +327,8 @@ export function App() {
 
   return (
     <div className="app">
-      <header className="app-header">
+      <SkipLink targetId="draft-punk-canvas" />
+      <header className="app-header" role="banner">
         <span className="app-name">Draft Punk</span>
         <Toolbar
           active={toolType}
@@ -294,7 +350,7 @@ export function App() {
           <ShareButton />
         </div>
       </header>
-      <main className="app-canvas">
+      <main className="app-canvas" id="main">
         {doc && (
           <CanvasView
             doc={doc}
@@ -313,8 +369,9 @@ export function App() {
             onClear={() => yStrokes && doc && clearStrokes(yStrokes, doc)}
           />
         )}
-        <div className={`app-status ${status}`}>{status}</div>
+        <div className={`app-status ${status}`} aria-hidden>{status}</div>
       </main>
+      <Announcer politeMessage={politeMessage} assertiveMessage={assertiveMessage} />
     </div>
   );
 }
